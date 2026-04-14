@@ -608,10 +608,16 @@ export class Panel {
 				}
 			}
 
-			// Action card
-			const action = event.action
-			if (action) {
-				cards.push(...this.#createActionCards(action, meta))
+			// Action card(s)
+			if (event.actions && event.actions.length > 0) {
+				for (const action of event.actions) {
+					cards.push(...this.#createActionCards(action, meta))
+				}
+			} else {
+				const action = event.action
+				if (action) {
+					cards.push(...this.#createActionCards(action, meta))
+				}
 			}
 		} else if (event.type === 'observation') {
 			cards.push(

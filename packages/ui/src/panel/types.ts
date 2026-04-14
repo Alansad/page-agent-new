@@ -47,6 +47,13 @@ export interface PanelAgentAdapter extends EventTarget {
 			input: unknown
 			output: string
 		}
+		/** Optional batch actions for 'step' type */
+		actions?: {
+			name: string
+			input: unknown
+			output: string
+			duration: number
+		}[]
 		/** For 'observation' type */
 		content?: string
 		/** For 'retry' type */

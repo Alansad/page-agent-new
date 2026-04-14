@@ -17,6 +17,17 @@ export interface AgentConfig extends LLMConfig {
 	maxSteps?: number
 
 	/**
+	 * Maximum number of actions the agent can execute in a single step (single LLM roundtrip).
+	 *
+	 * @remarks
+	 * Increasing this can reduce total LLM calls, but can be risky because the page state may change
+	 * after each action (indexes can become stale). Keep it small.
+	 *
+	 * @default 1
+	 */
+	maxActionsPerStep?: number
+
+	/**
 	 * Custom tools to extend PageAgent capabilities
 	 * @experimental
 	 * @note You can also override or remove internal tools by using the same name.
@@ -181,7 +192,12 @@ export interface AgentReflection {
  * Before executing any action, the LLM must output its reasoning state.
  */
 export interface MacroToolInput extends Partial<AgentReflection> {
-	action: Record<string, any>
+	/**
+	 * Single action (legacy) OR an array of actions for batch execution in one step.
+	 *
+	 * Each action must be an object like: `{ tool_name: { ...params } }`.
+	 */
+	action: Record<string, any> | Array<Record<string, any>>
 }
 
 /**
@@ -189,7 +205,23 @@ export interface MacroToolInput extends Partial<AgentReflection> {
  */
 export interface MacroToolResult {
 	input: MacroToolInput
+	/**
+	 * Human-readable summary for history/prompt.
+	 */
 	output: string
+	/**
+	 * Per-action outputs (same order as actions).
+	 */
+	outputs?: string[]
+	/**
+	 * Per-action structured results (same order as actions).
+	 */
+	actions?: Array<{
+		name: string
+		input: any
+		output: string
+		duration: number
+	}>
 }
 
 /**
@@ -199,6 +231,16 @@ export interface AgentStepEvent {
 	type: 'step'
 	stepIndex: number
 	reflection: Partial<AgentReflection>
+	/**
+	 * Optional list of actions executed in this step (batch mode).
+	 * When present, `action` is usually the last action for backward compatibility.
+	 */
+	actions?: Array<{
+		name: string
+		input: any
+		output: string
+		duration: number
+	}>
 	action: {
 		name: string
 		input: any

@@ -93,7 +93,7 @@ export function normalizeResponse(response: any, tools?: Map<string, PageAgentTo
 	// fix incomplete formats
 	if (!resolvedArguments.action) {
 		log(`#5: fixing tool_call`)
-		resolvedArguments.action = { name: 'wait', input: { seconds: 1 } }
+		resolvedArguments.action = { wait: { seconds: 1 } }
 	}
 
 	// pack back to standard format
@@ -129,6 +129,11 @@ export function normalizeResponse(response: any, tools?: Map<string, PageAgentTo
  */
 function validateAction(action: any, tools: Map<string, PageAgentTool>): any {
 	if (typeof action !== 'object' || action === null) return action
+
+	// Batch actions: validate each action object in order
+	if (Array.isArray(action)) {
+		return action.map((a) => validateAction(a, tools))
+	}
 
 	const toolName = Object.keys(action)[0]
 	if (!toolName) return action

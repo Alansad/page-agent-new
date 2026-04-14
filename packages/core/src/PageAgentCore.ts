@@ -271,10 +271,28 @@ export class PageAgentCore extends EventTarget {
 					memory: input.memory,
 					next_goal: input.next_goal,
 				}
-				const actionName = Object.keys(input.action)[0]
+
+				const actionResults =
+					macroResult.actions && macroResult.actions.length > 0
+						? macroResult.actions
+						: [
+								(() => {
+									const single = Array.isArray(input.action) ? input.action[0] : input.action
+									const name = Object.keys(single)[0]
+									return {
+										name,
+										input: (single as any)[name],
+										output,
+										duration: 0,
+									}
+								})(),
+							]
+
+				const primaryAction = actionResults[actionResults.length - 1]!
+				const actionName = primaryAction.name
 				const action: AgentStepEvent['action'] = {
 					name: actionName,
-					input: input.action[actionName],
+					input: primaryAction.input,
 					output: output,
 				}
 
@@ -282,6 +300,7 @@ export class PageAgentCore extends EventTarget {
 					type: 'step',
 					stepIndex: step,
 					reflection,
+					actions: actionResults.length > 1 ? actionResults : undefined,
 					action,
 					usage: result.usage,
 					rawResponse: result.rawResponse,
@@ -366,12 +385,16 @@ export class PageAgentCore extends EventTarget {
 
 		const actionSchema = z.union(actionSchemas as unknown as [z.ZodType, z.ZodType, ...z.ZodType[]])
 
+		const maxActionsPerStep = this.config.maxActionsPerStep ?? 1
+		const actionListSchema = z.array(actionSchema).min(1).max(maxActionsPerStep)
+
 		const macroToolSchema = z.object({
 			// thinking: z.string().optional(),
 			evaluation_previous_goal: z.string().optional(),
 			memory: z.string().optional(),
 			next_goal: z.string().optional(),
-			action: actionSchema,
+			// allow single action (legacy) or an action list (batch mode)
+			action: z.union([actionSchema, actionListSchema]),
 		})
 
 		return {
@@ -382,10 +405,20 @@ export class PageAgentCore extends EventTarget {
 				if (this.#abortController.signal.aborted) throw new Error('AbortError')
 
 				console.log(chalk.blue.bold('MacroTool input'), input)
-				const action = input.action
+				const actions = Array.isArray(input.action) ? input.action : [input.action]
+				if (actions.length > maxActionsPerStep) {
+					throw new Error(
+						`Too many actions in one step: ${actions.length} > maxActionsPerStep(${maxActionsPerStep})`
+					)
+				}
 
-				const toolName = Object.keys(action)[0]
-				const toolInput = action[toolName]
+				// `done` must be the only action (same rule as system prompt)
+				if (
+					actions.length > 1 &&
+					actions.some((a) => Object.keys(a || {})[0] === 'done')
+				) {
+					throw new Error('Invalid action list: `done` must be the only action in a step')
+				}
 
 				// Build reflection text, only include non-empty fields
 				const reflectionLines: string[] = []
@@ -400,43 +433,61 @@ export class PageAgentCore extends EventTarget {
 					console.log(reflectionText)
 				}
 
-				// Find the corresponding tool
-				const tool = tools.get(toolName)
-				assert(tool, `Tool ${toolName} not found`)
+				const results: MacroToolResult['actions'] = []
+				const outputs: string[] = []
 
-				console.log(chalk.blue.bold(`Executing tool: ${toolName}`), toolInput)
+				for (const action of actions) {
+					const toolName = Object.keys(action)[0]
+					const toolInput = (action as any)[toolName]
 
-				// Emit executing activity
-				this.#emitActivity({ type: 'executing', tool: toolName, input: toolInput })
+					// Find the corresponding tool
+					const tool = tools.get(toolName)
+					assert(tool, `Tool ${toolName} not found`)
 
-				const startTime = Date.now()
+					console.log(chalk.blue.bold(`Executing tool: ${toolName}`), toolInput)
 
-				// Execute tool, bind `this` to PageAgent
-				const result = await tool.execute.bind(this)(toolInput)
+					// Emit executing activity
+					this.#emitActivity({ type: 'executing', tool: toolName, input: toolInput })
 
-				const duration = Date.now() - startTime
-				console.log(chalk.green.bold(`Tool (${toolName}) executed for ${duration}ms`), result)
+					const startTime = Date.now()
 
-				// Emit executed activity
-				this.#emitActivity({
-					type: 'executed',
-					tool: toolName,
-					input: toolInput,
-					output: result,
-					duration,
-				})
+					// Execute tool, bind `this` to PageAgent
+					const output = await tool.execute.bind(this)(toolInput)
 
-				// counting wait time
-				if (toolName === 'wait') {
-					this.#states.totalWaitTime += toolInput?.seconds || 0
-				} else {
-					this.#states.totalWaitTime = 0
+					const duration = Date.now() - startTime
+					console.log(chalk.green.bold(`Tool (${toolName}) executed for ${duration}ms`), output)
+
+					// Emit executed activity
+					this.#emitActivity({
+						type: 'executed',
+						tool: toolName,
+						input: toolInput,
+						output,
+						duration,
+					})
+
+					results?.push({ name: toolName, input: toolInput, output, duration })
+					outputs.push(output)
+
+					// counting wait time
+					if (toolName === 'wait') {
+						this.#states.totalWaitTime += toolInput?.seconds || 0
+					} else {
+						this.#states.totalWaitTime = 0
+					}
 				}
+
+				const summary =
+					results && results.length > 1
+						? results.map((r, i) => `${i + 1}) ${r.name}: ${r.output}`).join('\n')
+						: outputs[0] || ''
 
 				// Return structured result
 				return {
 					input,
-					output: result,
+					output: summary,
+					outputs,
+					actions: results,
 				}
 			},
 		}
