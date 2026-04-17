@@ -29,6 +29,7 @@
         "dev:ext": "npm run dev -w @page-agent/ext",
         "dev:demo": "npm run dev:demo --workspace=page-agent",
         "build": "npm run build:libs && npm run build:website",
+        "build:iife": "npm run build:iife -w page-agent",
         "build:libs": "npm run build --workspaces --if-present",
         "build:website": "npm run build:website --workspace=@page-agent/website",
         "build:ext": "npm run build:libs && npm run zip -w @page-agent/ext",
