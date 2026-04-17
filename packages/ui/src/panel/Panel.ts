@@ -11,6 +11,17 @@ import styles from './Panel.module.css'
 export interface PanelConfig {
 	language?: SupportedLanguage
 	/**
+	 * Whether to auto-show the panel when the agent starts running.
+	 *
+	 * @remarks
+	 * When set to false, the panel stays hidden even if you call `agent.execute()`.
+	 * The panel will still show if the agent asks the user a question (ask_user),
+	 * so the user has a place to answer.
+	 *
+	 * @default true
+	 */
+	autoShow?: boolean
+	/**
 	 * Whether to prompt for next task after task completion
 	 * @default true
 	 */
@@ -99,6 +110,7 @@ export class Panel {
 	/** Handle agent status change */
 	#handleStatusChange(): void {
 		const status = this.#agent.status
+		const autoShow = this.#config.autoShow ?? true
 
 		// Map agent status to UI indicator type
 		const indicatorType =
@@ -116,12 +128,14 @@ export class Panel {
 
 		// Show/hide based on status
 		if (status === 'running') {
-			this.show()
+			if (autoShow) {
+				this.show()
+			}
 			this.#hideInputArea() // Hide input while running
 		}
 
 		// Handle completion
-		if (status === 'completed' || status === 'error') {
+		if ((status === 'completed' || status === 'error') && autoShow) {
 			if (!this.#isExpanded) {
 				this.#expand()
 			}
@@ -173,6 +187,9 @@ export class Panel {
 	 */
 	#askUser(question: string): Promise<string> {
 		return new Promise((resolve) => {
+			// Always show the panel when user interaction is required.
+			this.show()
+
 			// Set `waiting for user answer` state
 			this.#isWaitingForUserAnswer = true
 			this.#userAnswerResolver = resolve
